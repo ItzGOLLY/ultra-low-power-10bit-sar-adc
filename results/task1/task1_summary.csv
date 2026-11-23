@@ -1,0 +1,93 @@
+section,parameter,value,unit,note
+Configuration,Architecture,"10-bit SAR, single-ended, top-plate sampled, conventional switching",,
+Configuration,Resolution,10,bit,
+Configuration,VDD,1.8,V,
+Configuration,Vref (input range 0..Vref),1.8,V,
+Configuration,Vcm (comparator Vinn),0.9,V,tie Vinn of the StrongARM to this
+Configuration,Sampling rate fs,100000,S/s,
+Configuration,Bit-clock frequency,1.2e+06,Hz,12 cycles per conversion
+Configuration,LSB,1.75781,mV,
+Configuration,Unit capacitor Cu,10,fF,
+Configuration,Unit caps in array,1024,Cu,512+256+...+1 + 1 dummy
+Configuration,Total CDAC capacitance (with mismatch),10.2395,pF,
+Configuration,Top-plate parasitic,152.874,fF,
+Configuration,Effective input range,0.0132 .. 1.7868,V,Vcm +/- 0.9853 x Vref/2 (top-plate parasitic attenuation); beyond this the codes clip
+Configuration,Input source,"built-in coherent sine: fin = 48901.4 Hz (bin 2003 of 4096), -1 dBFS",,
+Configuration,Conversions simulated,4096,,
+Configuration,Ideal mode,no,,
+Power,CDAC switching (Vref) - bit cycling - power,1.34958,uW,13.5 pJ/conversion; 48.7% of dynamic
+Power,CDAC switching (Vref) - reset/sampling - power,0.830337,uW,8.303 pJ/conversion; 30.0% of dynamic
+Power,StrongARM comparator - power,0.105624,uW,1.056 pJ/conversion; 3.8% of dynamic
+Power,SR latch + output buffers - power,0.012655,uW,0.1265 pJ/conversion; 0.5% of dynamic
+Power,SAR logic (sequencer + registers) - power,0.413218,uW,4.132 pJ/conversion; 14.9% of dynamic
+Power,CDAC bit drivers (gate drive) - power,0.00714875,uW,0.07149 pJ/conversion; 0.3% of dynamic
+Power,Bootstrapped switch - power,0.0122672,uW,0.1227 pJ/conversion; 0.4% of dynamic
+Power,Non-overlap clock generator - power,0.03888,uW,0.3888 pJ/conversion; 1.4% of dynamic
+Power,Static leakage,0.002,uW,
+Power,TOTAL POWER,2.77171,uW,
+Power,Energy per conversion,27.7171,pJ,
+Power,Drawn from Vref (CDAC),2.17991,uW,
+Power,Drawn from VDD (everything else + leakage),0.591793,uW,
+Dynamic performance,FFT window,rectangular (coherent),,
+Dynamic performance,Detected input frequency,48901.4,Hz,
+Dynamic performance,Signal level,-0.871958,dBFS,
+Dynamic performance,SNDR (SINAD),59.6928,dB,
+Dynamic performance,SNR,59.7658,dB,
+Dynamic performance,THD,-77.4721,dBc,
+Dynamic performance,SFDR,79.4189,dBc,
+Dynamic performance,ENOB,9.62338,bit,at the applied amplitude
+Dynamic performance,ENOB (normalised to full scale),9.76822,bit,
+Dynamic performance,Noise floor (per bin),-93.7319,dBFS,
+Dynamic performance,HD2 (at 2197.27 Hz),-79.4189,dBc,
+Dynamic performance,HD3 (at 46704.1 Hz),-91.7606,dBc,
+Dynamic performance,HD4 (at 4394.53 Hz),-89.7662,dBc,
+Dynamic performance,HD5 (at 44506.8 Hz),-94.0745,dBc,
+Dynamic performance,RMS error vs ideal input,5.06126,LSB,includes offset & gain error
+Dynamic performance,Effective resolution after gain/offset fit,9.73786,bit,valid for any input waveform
+Dynamic performance,Out-of-range input samples,0,,below 0 V or above Vref
+Dynamic performance,Metastable comparator decisions,0,,
+Dynamic performance,Samples at code 0 or full scale,0,,non-zero means the input reaches the clipping range
+Static performance (ramp code-density test),Ramp conversions,34735,,
+Static performance (ramp code-density test),DNL max / min,+0.269 / -0.270,LSB,
+Static performance (ramp code-density test),INL max / min (end-point fit),+0.314 / -0.161,LSB,
+Static performance (ramp code-density test),Missing codes,0,,
+Static performance (ramp code-density test),Offset error at mid-scale (511->512),1.72131,LSB,comparator offset + switch charge injection/feed-through
+Static performance (ramp code-density test),Offset error at first transition (0->1),9.04715,LSB,"includes the gain error, which pivots about Vcm"
+Static performance (ramp code-density test),Gain error,-15.1204,LSB,-1.479% (top-plate parasitic attenuation)
+Figures of merit,Walden FoM = P/(2^ENOB*fs),31.7847,fJ/conv-step,uses full-scale ENOB
+Figures of merit,Schreier FoM = SNDR + 10log(fs/2/P),163.127,dB,full-scale SNDR
+Figures of merit,Energy per conversion,27.7171,pJ,
+Timing,Conversion period,10,us,
+Timing,Bit-clock period,833.333,ns,
+Timing,Track (sampling) time,833.333,ns,
+Timing,Latency: sampling instant -> data valid,8333.21,ns,
+Timing,PHI1 -> PHI2 non-overlap,160,ps,
+Timing,PHI2 -> PHI1 non-overlap,160,ps,
+Timing,Comparator decision time (median / max),317 / 915,ps,time available 416.7 ns
+Timing,DAC settling to 0.5 LSB (largest top-plate step Vref/4),12.4766,ns,available 416.4 ns
+Timing,Track-mode time constant (median),0.570199,ns,
+Block characteristics,Bootstrap ratio Cb/(Cb+C_G),0.973255,,
+Block characteristics,M1 charge-injection step at Vin = 0 / Vref/2 / Vref,0.55 / 0.46 / 0.12,LSB,the variation across the range is what distorts; scale M1_W with the sampling capacitance
+Block characteristics,M1 gate cap,22.48,fF,
+Block characteristics,Node B ceiling (M2 gated by PHI),1.1277,V,above this Vin the boost degrades
+Block characteristics,M1 Ron at Vin = 0 / Vref/2 / Vref,46.1 / 54.9 / 217.2,ohm,
+Block characteristics,Track bandwidth at Vin = Vref/2,279.122,MHz,
+Block characteristics,kT/C noise,19.9639,uV rms,
+Block characteristics,Bootstrapped switch energy/sample,122.672,fJ,
+Block characteristics,Comparator offset (this instance),1.48703,mV,Pelgrom sigma = 4.17 mV
+Block characteristics,Comparator noise,0.3,mV rms,
+Block characteristics,Comparator energy/decision,105.624,fJ,
+Block characteristics,CDAC cap errors b9..b0 (%),+0.000 +0.009 -0.012 -0.056 -0.040 -0.124 +0.011 +0.335 -0.174 -0.310,%,
+Block characteristics,Clock-generator energy/frame,388.8,fJ,
+CDAC switching-energy study (ideal array),Average energy per cycle (this scheme),681.667,C*Vref^2,"bit cycling + reset, single-ended"
+CDAC switching-energy study (ideal array),  of which bit cycling,425.667,C*Vref^2,
+CDAC switching-energy study (ideal array),  of which reset/sampling,256,C*Vref^2,
+CDAC switching-energy study (ideal array),Textbook conventional (bottom-plate sampled),681.667,C*Vref^2,single-ended
+CDAC switching-energy study (ideal array),Differential equivalent (x2),1363.33,C*Vref^2,closed form (Ginsburg/Liu) = 1363.3
+CDAC switching-energy study (ideal array),Max / min energy over all codes,980.3 / 340.8,C*Vref^2,
+CDAC switching-energy study (ideal array),"Average in joules at this Cu, Vref",22.086,pJ,
+Design hints,Bootstrapped switch M2 gate driven by PHI (as drawn),"SFDR 79.4 dBc, THD -77.5 dBc, HD2 -79.4 dBc",,
+Design hints,Same chip with M2 gate tied to G,"SFDR 84.1 dBc, THD -85.5 dBc, HD2 -95.8 dBc",,"with PHI on M2's gate node B cannot pass Vin above VDD - Vth, so the boost and Ron degrade near full scale"
+Design hints,Comparator reference,tie Vinn to Vcm = 0.9 V; the MSB plate sits at Vref during PHI1,,
+Design hints,Driver polarity,bit drivers are inverters: drive input = NOT(bottom-plate state),,
+Notes,Model,behavioural/circuit-aware; replace DEFAULT_PARAMS with your Spectre numbers,,

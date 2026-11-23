@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+# Cadence ViVA waveform files are large; regenerate with `make waveforms` or download them from the release
+*.vcsv
+*_ascii.txt

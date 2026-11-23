@@ -1,0 +1,380 @@
+// =============================================================================
+//  sar_adc_10b.va  -  10-bit SAR ADC, behavioural Verilog-A model
+//  For Cadence Virtuoso (ADE + Spectre).   The cell name must be:  sar_adc_10b
+// -----------------------------------------------------------------------------
+//  PINS
+//   Vin        analog input, 0 ... Vref (measured from GND)
+//   CLK        SAR bit clock, 12 rising edges per conversion:
+//                edge 1        sample Vin (the CDAC top plate holds Vin)
+//                edges 2..11   bit decisions b9 (MSB) ... b0 (LSB)
+//                edge 12       Dout[9:0] updated, Done high for one CLK period
+//              -> sampling rate fs = fCLK / 12   (fCLK = 1.2 MHz gives 100 kS/s)
+//   VDD        logic supply: high level of Dout/Done, supplies comparator + logic current
+//   GND        ground; every voltage is measured from this pin
+//   Vref       CDAC reference = full-scale input; supplies the capacitor switching charge
+//   Vb         common-mode bias Vcm, connect Vref/2 (0.9 V): comparator threshold, and the
+//              middle reference level of the Vcm-based scheme. If your Vb is a comparator
+//              bias instead, set vb_is_vcm = 0 and Vcm is taken as Vref/2 internally.
+//   Dout[9:0]  output code, Dout[9] = MSB, logic levels 0 / VDD
+//   Done       end of conversion; Dout is stable when Done rises
+// -----------------------------------------------------------------------------
+//  MODEL
+//   * Charge-redistribution CDAC with top-plate sampling, solved by charge
+//     conservation at every bit cycle (so mismatch and parasitics are handled).
+//       scheme = 0  conventional: 512C ... 1C + 1C dummy, MSB plate on Vref while sampling
+//       scheme = 1  Vcm-based (Zhu et al., JSSC 2010): 256C ... 1C + 1C dummy, plates on Vcm
+//   * Optional non-idealities (all off by default = ideal converter): comparator
+//     offset and noise, unit-capacitor mismatch, top-plate parasitic, kT/C noise.
+//   * Power: the CDAC switching charge is drawn from the Vref pin (and from Vb in the
+//     Vcm-based scheme); comparator + logic charge is drawn from VDD. Measure power in
+//     ADE from the source currents. A summary (power, energy per conversion, ENOB, FoM)
+//     is printed in the Spectre output log at the end of every transient run.
+//   * The energy numbers e_cmp, e_dig and i_leak are estimates - replace them with values
+//     from your transistor-level simulations.
+// =============================================================================
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+// resolution [bit] and number of CDAC elements including the dummy
+`define SAR_NB 10
+`define SAR_NE 11
+// CSV log written when log_en = 1. A bare file name lands in the simulation's netlist
+// folder; put a full path here to choose the location, e.g. "/home/<user>/sar_log.csv"
+`define SAR_LOGFILE "sar_adc_10b_log.csv"
+
+module sar_adc_10b (Vin, CLK, VDD, GND, Vref, Vb, Dout, Done);
+
+    input  Vin, CLK;
+    inout  VDD, GND, Vref, Vb;          // inout: the model draws supply/reference current
+    output [9:0] Dout;
+    output Done;
+
+    electrical Vin, CLK, VDD, GND, Vref, Vb, Done;
+    electrical [9:0] Dout;
+
+    // ------------------------------------------------------------------ parameters
+    // architecture
+    parameter integer scheme    = 0    from [0:1];     // 0 = conventional, 1 = Vcm-based
+    parameter integer vb_is_vcm = 1    from [0:1];     // 1 = Vb is Vcm, 0 = Vcm is Vref/2
+    // capacitive DAC
+    parameter real    cu        = 10f  from (0:inf);   // unit capacitor [F]
+    parameter real    cpar      = 0    from [0:inf);   // top-plate parasitic to GND [F]
+    parameter real    sigma_cu  = 0    from [0:0.5);   // unit-cap mismatch (relative, 1 sigma)
+    // clock input: threshold as a fraction of VDD. Deliberately not 0.5, so a time step
+    // that lands on the middle of a clock edge can never sit exactly on the threshold.
+    parameter real    clk_th    = 0.45 from (0:1);
+    // comparator and sampling
+    parameter real    vos       = 0;                   // comparator offset [V]
+    parameter real    vnoise    = 0    from [0:inf);   // comparator noise [V rms]
+    parameter integer ktc_noise = 0    from [0:1];     // 1 = add kT/C noise to the sample
+    parameter integer seed      = 17;                  // random seed (mismatch, noise)
+    // logic outputs
+    parameter real    td        = 1n   from [0:inf);   // CLK edge -> Dout delay [s]
+    parameter real    tr_out    = 100p from (0:inf);   // Dout / Done rise and fall time [s]
+    // power model (estimates - replace with your transistor-level numbers)
+    parameter real    e_cmp     = 118f from [0:inf);   // comparator + SR latch, per decision [J]
+    parameter real    e_dig     = 390f from [0:inf);   // SAR logic + clocking, per CLK cycle [J]
+    parameter real    i_leak    = 1n   from [0:inf);   // static current from VDD [A]
+    parameter real    tpulse    = 1n   from (0:inf);   // width of the supply-current pulses [s]
+    // reporting
+    parameter integer summary   = 1    from [0:1];     // 1 = print summary at end of tran
+    parameter integer verbose   = 0    from [0:1];     // 1 = print every conversion
+    parameter integer log_en    = 0    from [0:1];     // 1 = write one CSV line per conversion
+
+    // ------------------------------------------------------------------ variables
+    real    cw[0:10];     // capacitance of each element [F]; 0 = largest, last used = dummy
+    integer st[0:10];     // bottom-plate connection: 0 = GND, 1 = Vcm, 2 = Vref
+    integer st0[0:10];    // connection while sampling
+    integer stn[0:10];    // next connection (scratch)
+    integer stf[0:10];    // final connection of the previous conversion
+    integer bits[0:9];    // decisions of the running conversion, bits[0] = b9 (MSB)
+    integer dreg[0:9];    // output register, dreg[i] drives Dout[i]
+
+    integer k, j, cnt, code, rseed, fd, done_lvl, have_prev, eoc_now;
+    integer n_samp, n_conv, n_e, n_rail, n_oor;
+    real    wk, ctot, cs, vrefv, vcmv, vddv, vs, vx, vxn, vxf, dv, dq;
+    real    qref, qvcm, qvdd, lvl_ref, lvl_vcm, lvl_vdd, t_off, tw, t_prev, tclk;
+    real    e_ref_c, e_vcm_c, e_vdd_c, e_ref_t, e_vcm_t, e_vdd_t;
+    real    t_first, t_last, lsb, xv, yv, sx, sy, sxx, sxy, syy, xmin, xmax;
+    real    sxx_c, sxy_c, syy_c, a_fit, b_fit, sse, rms_lsb, enob, fs_m, e_conv, p_tot;
+
+    genvar i;
+
+    // voltage of a bottom-plate connection (s: 0 = GND, 1 = Vcm, 2 = Vref)
+    analog function real vplate;
+        input s, vr, vc;
+        real s, vr, vc;
+        begin
+            vplate = (s > 1.5) ? vr : ((s > 0.5) ? vc : 0.0);
+        end
+    endfunction
+
+    analog begin
+
+        // ============================================================ start of every analysis
+        @(initial_step) begin
+            rseed = seed;
+            ctot  = 0.0;
+            for (k = 0; k < `SAR_NE; k = k + 1) begin
+                if (scheme == 0)        // 512, 256, ..., 1, dummy 1
+                    wk = (k < `SAR_NB) ? pow(2.0, `SAR_NB - 1 - k) : 1.0;
+                else                    // 256, ..., 1, dummy 1, (unused slot)
+                    wk = (k < `SAR_NB - 1) ? pow(2.0, `SAR_NB - 2 - k) : ((k == `SAR_NB - 1) ? 1.0 : 0.0);
+                cw[k] = cu * wk;
+                if (sigma_cu > 0.0 && wk > 0.0)
+                    cw[k] = cw[k] * (1.0 + $rdist_normal(rseed, 0.0, sigma_cu / sqrt(wk)));
+                ctot = ctot + cw[k];
+                if (scheme == 0)
+                    st0[k] = (k == 0) ? 2 : 0;       // MSB plate on Vref, the rest on GND
+                else
+                    st0[k] = (wk > 0.0) ? 1 : 0;     // every plate on Vcm
+                st[k]  = st0[k];
+                stn[k] = st0[k];
+                stf[k] = st0[k];
+            end
+            cs = ctot + cpar;
+            for (j = 0; j < `SAR_NB; j = j + 1) begin
+                bits[j] = 0;
+                dreg[j] = 0;
+            end
+            cnt = 0;  code = 0;  done_lvl = 0;  have_prev = 0;  eoc_now = 0;
+            n_samp = 0;  n_conv = 0;  n_e = 0;  n_rail = 0;  n_oor = 0;
+            vs = 0.0;  vx = 0.0;  vxf = 0.0;
+            lvl_ref = 0.0;  lvl_vcm = 0.0;  lvl_vdd = 0.0;
+            t_off = 0.0;  t_prev = -1.0;  tclk = 0.0;
+            e_ref_c = 0.0;  e_vcm_c = 0.0;  e_vdd_c = 0.0;
+            e_ref_t = 0.0;  e_vcm_t = 0.0;  e_vdd_t = 0.0;
+            t_first = 0.0;  t_last = 0.0;
+            sx = 0.0;  sy = 0.0;  sxx = 0.0;  sxy = 0.0;  syy = 0.0;
+            xmin = 1.0e9;  xmax = -1.0e9;
+        end
+
+        @(initial_step("tran")) begin
+            fd = 0;
+            if (log_en == 1) begin
+                fd = $fopen(`SAR_LOGFILE);
+                $fstrobe(fd, "n,t_sample_s,vin_sampled_V,code,b9,b8,b7,b6,b5,b4,b3,b2,b1,b0,E_vref_pJ,E_vb_pJ,E_vdd_pJ");
+            end
+        end
+
+        // ============================================================ every rising CLK edge
+        @(cross(V(CLK, GND) - clk_th * V(VDD, GND), +1, 10p)) begin
+            vrefv   = V(Vref, GND);
+            vddv    = V(VDD, GND);
+            vcmv    = (vb_is_vcm == 1) ? V(Vb, GND) : 0.5 * vrefv;
+            qref    = 0.0;
+            qvcm    = 0.0;
+            qvdd    = (vddv > 0.0) ? e_dig / vddv : 0.0;   // logic + clocking, every cycle
+            eoc_now = 0;
+
+            if (cnt == 0) begin
+                // ---------------------------------------- sample: the top plate holds Vin
+                vs = V(Vin, GND);
+                if (ktc_noise == 1)
+                    vs = vs + $rdist_normal(rseed, 0.0, sqrt(`P_K * $temperature / cs));
+                if (have_prev == 1) begin
+                    // charge drawn while the plates were reset and the top plate tracked Vin
+                    for (k = 0; k < `SAR_NE; k = k + 1) begin
+                        dq = cw[k] * ((vplate(st0[k], vrefv, vcmv) - vs)
+                                    - (vplate(stf[k], vrefv, vcmv) - vxf));
+                        if (st0[k] == 2) qref = qref + dq;
+                        if (st0[k] == 1) qvcm = qvcm + dq;
+                    end
+                end
+                for (k = 0; k < `SAR_NE; k = k + 1)
+                    st[k] = st0[k];
+                vx       = vs;
+                done_lvl = 0;
+                e_ref_c  = 0.0;  e_vcm_c = 0.0;  e_vdd_c = 0.0;
+                if (n_samp == 0) begin
+                    t_first = $abstime;
+                    if (vb_is_vcm == 1 && abs(vcmv - 0.5 * vrefv) > 0.05 * vrefv)
+                        $strobe("%m WARNING: Vb = %g V but Vref/2 = %g V. Vb is used as Vcm (comparator threshold): connect Vref/2, or set vb_is_vcm = 0.", vcmv, 0.5 * vrefv);
+                    if (vddv < 0.5)
+                        $strobe("%m WARNING: VDD = %g V, so Dout and Done have almost no logic swing.", vddv);
+                end
+                t_last = $abstime;
+                n_samp = n_samp + 1;
+                if (vs < 0.0 || vs > vrefv)
+                    n_oor = n_oor + 1;
+                cnt = 1;
+            end
+            else if (cnt <= `SAR_NB) begin
+                // ---------------------------------------- bit decision j (j = 0 is b9)
+                j  = cnt - 1;
+                dv = vx - vcmv - vos;
+                if (vnoise > 0.0)
+                    dv = dv + $rdist_normal(rseed, 0.0, vnoise);
+                bits[j] = (dv > 0.0) ? 1 : 0;
+                if (vddv > 0.0)
+                    qvdd = qvdd + e_cmp / vddv;
+                if (j < `SAR_NB - 1) begin
+                    // next bottom-plate connections
+                    for (k = 0; k < `SAR_NE; k = k + 1)
+                        stn[k] = st[k];
+                    stn[j] = (bits[j] == 1) ? 0 : 2;         // bit 1: plate to GND, bit 0: to Vref
+                    if (scheme == 0)
+                        stn[j + 1] = 2;                       // conventional: raise the next trial plate
+                    // charge conservation on the floating top plate
+                    vxn = vx;
+                    for (k = 0; k < `SAR_NE; k = k + 1)
+                        vxn = vxn + cw[k] * (vplate(stn[k], vrefv, vcmv) - vplate(st[k], vrefv, vcmv)) / cs;
+                    for (k = 0; k < `SAR_NE; k = k + 1) begin
+                        dq = cw[k] * ((vplate(stn[k], vrefv, vcmv) - vxn)
+                                    - (vplate(st[k], vrefv, vcmv) - vx));
+                        if (stn[k] == 2) qref = qref + dq;
+                        if (stn[k] == 1) qvcm = qvcm + dq;
+                        st[k] = stn[k];
+                    end
+                    vx = vxn;
+                end
+                cnt = cnt + 1;
+            end
+            else begin
+                // ---------------------------------------- end of conversion
+                code = 0;
+                for (j = 0; j < `SAR_NB; j = j + 1) begin
+                    code = 2 * code + bits[j];
+                    dreg[`SAR_NB - 1 - j] = bits[j];
+                end
+                done_lvl = 1;
+                for (k = 0; k < `SAR_NE; k = k + 1)
+                    stf[k] = st[k];
+                vxf       = vx;
+                have_prev = 1;
+                eoc_now   = 1;
+                cnt       = 0;
+            end
+
+            // -------------------------------------------- energy of this edge
+            e_ref_c = e_ref_c + vrefv * qref;
+            e_vcm_c = e_vcm_c + vcmv * qvcm;
+            e_vdd_c = e_vdd_c + vddv * qvdd;
+
+            // -------------------------------------------- current pulses, area = charge
+            if (t_prev >= 0.0)
+                tclk = $abstime - t_prev;
+            t_prev = $abstime;
+            tw = tpulse;
+            if (tclk > 0.0 && tw > 0.25 * tclk)
+                tw = 0.25 * tclk;
+            lvl_ref = qref / tw;
+            lvl_vcm = qvcm / tw;
+            lvl_vdd = qvdd / tw;
+            t_off   = $abstime + tw;
+
+            // -------------------------------------------- statistics at the end of a conversion
+            if (eoc_now == 1) begin
+                n_conv = n_conv + 1;
+                if (n_conv >= 2) begin              // conversion 1 has no reset history
+                    e_ref_t = e_ref_t + e_ref_c;
+                    e_vcm_t = e_vcm_t + e_vcm_c;
+                    e_vdd_t = e_vdd_t + e_vdd_c;
+                    n_e = n_e + 1;
+                end
+                xv  = vs - 0.5 * vrefv;             // input from ideal mid-scale [V]
+                yv  = code - 511.5;                 // output from mid-scale [LSB]
+                sx  = sx + xv;
+                sy  = sy + yv;
+                sxx = sxx + xv * xv;
+                sxy = sxy + xv * yv;
+                syy = syy + yv * yv;
+                if (xv < xmin) xmin = xv;
+                if (xv > xmax) xmax = xv;
+                if (code == 0 || code == 1023)
+                    n_rail = n_rail + 1;
+                if (verbose == 1)
+                    $strobe("%m: conversion %d  t_sample = %g s  Vin = %g V  code = %d", n_conv, t_last, vs, code);
+                if (log_en == 1 && fd != 0)
+                    $fstrobe(fd, "%d,%e,%e,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%e,%e,%e",
+                             n_conv, t_last, vs, code,
+                             bits[0], bits[1], bits[2], bits[3], bits[4],
+                             bits[5], bits[6], bits[7], bits[8], bits[9],
+                             e_ref_c * 1e12, e_vcm_c * 1e12, e_vdd_c * 1e12);
+            end
+        end
+
+        // ============================================================ end of a current pulse
+        @(timer(t_off)) begin
+            lvl_ref = 0.0;
+            lvl_vcm = 0.0;
+            lvl_vdd = 0.0;
+        end
+
+        // ============================================================ end of the transient run
+        @(final_step("tran")) begin
+            if (summary == 1) begin
+                vrefv = V(Vref, GND);
+                vddv  = V(VDD, GND);
+                lsb   = vrefv / 1024.0;
+                fs_m  = 0.0;
+                if (n_samp > 1 && t_last > t_first)
+                    fs_m = (n_samp - 1) / (t_last - t_first);
+                e_conv = 0.0;
+                if (n_e > 0)
+                    e_conv = (e_ref_t + e_vcm_t + e_vdd_t) / n_e;
+                p_tot = e_conv * fs_m + i_leak * vddv;
+                enob  = -1.0;
+                if (n_conv >= 16 && (xmax - xmin) > 20.0 * lsb) begin
+                    // least-squares line through (input, code): the residual is noise + distortion
+                    sxx_c   = sxx - sx * sx / n_conv;
+                    sxy_c   = sxy - sx * sy / n_conv;
+                    syy_c   = syy - sy * sy / n_conv;
+                    a_fit   = sxy_c / sxx_c;
+                    b_fit   = (sy - a_fit * sx) / n_conv;
+                    sse     = syy_c - a_fit * sxy_c;
+                    rms_lsb = sqrt(max(sse / n_conv, 1.0e-12));
+                    enob    = `SAR_NB - ln(rms_lsb * sqrt(12.0)) / ln(2.0);
+                end
+                $strobe(" ");
+                $strobe("================ %m : 10-bit SAR ADC summary ================");
+                if (scheme == 0)
+                    $strobe("  switching scheme        : conventional (512C ... 1C + dummy)");
+                else
+                    $strobe("  switching scheme        : Vcm-based (256C ... 1C + dummy)");
+                $strobe("  conversions completed   : %d", n_conv);
+                $strobe("  sampling rate           : %g S/s", fs_m);
+                $strobe("  CDAC capacitance        : %g pF", ctot * 1e12);
+                if (n_e > 0) begin
+                    $strobe("  energy per conversion   : %g pJ", e_conv * 1e12);
+                    $strobe("    from Vref (CDAC)      : %g pJ  = %g C*Vref^2", e_ref_t / n_e * 1e12,
+                            (e_ref_t / n_e) / (cu * vrefv * vrefv));
+                    $strobe("    from Vb (Vcm)         : %g pJ", e_vcm_t / n_e * 1e12);
+                    $strobe("    from VDD              : %g pJ", e_vdd_t / n_e * 1e12);
+                    $strobe("  average power           : %g uW", p_tot * 1e6);
+                    $strobe("    Vref %g uW,  Vb %g uW,  VDD %g uW (incl. leakage)",
+                            e_ref_t / n_e * fs_m * 1e6, e_vcm_t / n_e * fs_m * 1e6,
+                            (e_vdd_t / n_e * fs_m + i_leak * vddv) * 1e6);
+                end
+                if (enob > 0.0) begin
+                    $strobe("  ENOB (code-vs-input fit): %g bit   (SNDR about %g dB)", enob, 6.02 * enob + 1.76);
+                    // input-referred: negative gain = full scale reached below Vref,
+                    // positive offset = transfer curve shifted to higher input
+                    $strobe("  gain error              : %g percent of full scale", 100.0 * (1.0 / (a_fit * lsb) - 1.0));
+                    $strobe("  offset at mid-scale     : %g LSB", -b_fit / (a_fit * lsb));
+                    if (fs_m > 0.0)
+                        $strobe("  Walden FoM              : %g fJ/conversion-step", 1e15 * p_tot / (pow(2.0, enob) * fs_m));
+                end
+                else
+                    $strobe("  ENOB                    : n/a (needs 16+ conversions spanning 20+ LSB)");
+                $strobe("  codes at 0 or 1023      : %d    samples outside 0..Vref : %d", n_rail, n_oor);
+                $strobe("==============================================================");
+            end
+            if (log_en == 1 && fd != 0)
+                $fclose(fd);
+        end
+
+        // ============================================================ outputs
+        for (i = 0; i < `SAR_NB; i = i + 1)
+            V(Dout[i], GND) <+ V(VDD, GND) * transition(1.0 * dreg[i], td, tr_out, tr_out);
+        // Done rises 2*tr_out after Dout so that Dout is already settled
+        V(Done, GND) <+ V(VDD, GND) * transition(1.0 * done_lvl, td + 2.0 * tr_out, tr_out, tr_out);
+
+        // ============================================================ supply / reference currents
+        I(Vref, GND) <+ transition(lvl_ref, 0.0, 0.1 * tpulse, 0.1 * tpulse);
+        I(Vb, GND)   <+ vb_is_vcm * transition(lvl_vcm, 0.0, 0.1 * tpulse, 0.1 * tpulse);
+        I(VDD, GND)  <+ transition(lvl_vdd, 0.0, 0.1 * tpulse, 0.1 * tpulse) + i_leak;
+
+    end
+endmodule

@@ -1,0 +1,22 @@
+name: models
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  run-models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run both SAR ADC models
+        run: make PY=python OUT=ci_out task1 task2
+      - name: Check key metrics against the reference results
+        run: make PY=python OUT=ci_out check
+      - name: Waveform and VCSV export
+        run: make PY=python OUT=ci_out waveforms

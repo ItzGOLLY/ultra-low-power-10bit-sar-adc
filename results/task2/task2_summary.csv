@@ -1,0 +1,98 @@
+section,parameter,value,unit,note
+Configuration,Architecture,"10-bit SAR, single-ended, top-plate sampled, Vcm-based switching (Zhu 2010)",,
+Configuration,Resolution,10,bit,
+Configuration,VDD,1.8,V,
+Configuration,Vref (input range 0..Vref),1.8,V,
+Configuration,Vcm (bottom-plate reset and comparator Vinn),0.9,V,error vs Vref/2 = 0 mV
+Configuration,Sampling rate fs,100000,S/s,
+Configuration,Bit-clock frequency,1.2e+06,Hz,12 cycles per conversion
+Configuration,LSB,1.75781,mV,
+Configuration,Unit capacitor Cu,10,fF,
+Configuration,Unit caps in array,512,Cu,256+128+...+1 + 1 dummy (conventional needs 1024)
+Configuration,Total CDAC capacitance (with mismatch),5.11962,pF,
+Configuration,Top-plate parasitic,91.4355,fF,
+Configuration,Effective input range,0.0158 .. 1.7842,V,Vcm +/- 0.9825 x Vref/2 (top-plate parasitic attenuation); beyond this the codes clip
+Configuration,Analog input,"demo file (sine 10961.9 Hz, coherent): analog_input_demo.csv, 40971 points, 0.04097 s, 0.09787..1.702 V",,
+Configuration,File header,/Vin X | /Vin Y,,"time column 0, voltage column 1"
+Configuration,Conversions,4096,,
+Configuration,Ideal mode,no,,
+Power,CDAC switching (Vref) - bit cycling - power,0.262835,uW,2.628 pJ/conversion; 30.7% of dynamic
+Power,CDAC switching (Vref) - reset/sampling - power,0,uW,0 pJ/conversion; 0.0% of dynamic
+Power,StrongARM comparator - power,0.105624,uW,1.056 pJ/conversion; 12.3% of dynamic
+Power,SR latch + output buffers - power,0.0127955,uW,0.128 pJ/conversion; 1.5% of dynamic
+Power,SAR logic (sequencer + registers) - power,0.411848,uW,4.118 pJ/conversion; 48.0% of dynamic
+Power,CDAC tri-level switch drivers (gate drive) - power,0.0129885,uW,0.1299 pJ/conversion; 1.5% of dynamic
+Power,Bootstrapped switch - power,0.0122675,uW,0.1227 pJ/conversion; 1.4% of dynamic
+Power,Non-overlap clock generator - power,0.03888,uW,0.3888 pJ/conversion; 4.5% of dynamic
+Power,Vcm reference - ideal decoupled source (net charge),-0.000626268,uW,charge into and out of Vcm cancels on average; literature (Zhu 2010) counts Vref only
+Power,Vcm generator static power,0,uW,set P_VCM_GEN_STATIC for a real buffer
+Power,Static leakage,0.002,uW,
+Power,TOTAL POWER,0.859238,uW,ideal Vcm source
+Power,Energy per conversion,8.59238,pJ,
+Power,Vcm buffer worst case (sources every event from VDD),0.295459,uW,bottom plates on Vcm carry the top-plate charge while tracking Vin; no recycling assumed
+Power,TOTAL POWER incl. worst-case Vcm buffer,1.1547,uW,
+Dynamic performance,FFT window,rectangular (coherent),,
+Dynamic performance,Detected input frequency,10961.9,Hz,
+Dynamic performance,Signal level,-0.850376,dBFS,
+Dynamic performance,SNDR (SINAD),59.5482,dB,
+Dynamic performance,SNR,59.7861,dB,
+Dynamic performance,THD,-72.2801,dBc,
+Dynamic performance,SFDR,72.7489,dBc,
+Dynamic performance,ENOB,9.59937,bit,at the applied amplitude
+Dynamic performance,ENOB (normalised to full scale),9.74063,bit,
+Dynamic performance,Noise floor (per bin),-93.7307,dBFS,
+Dynamic performance,HD2 (at 21923.8 Hz),-72.7489,dBc,
+Dynamic performance,HD3 (at 32885.7 Hz),-88.4385,dBc,
+Dynamic performance,HD4 (at 43847.7 Hz),-90.7998,dBc,
+Dynamic performance,HD5 (at 45190.4 Hz),-90.3038,dBc,
+Dynamic performance,RMS error vs ideal input,6.28505,LSB,includes offset & gain error
+Dynamic performance,Effective resolution after gain/offset fit,9.74056,bit,valid for any input waveform
+Dynamic performance,Out-of-range input samples,0,,below 0 V or above Vref (clipped)
+Dynamic performance,Metastable comparator decisions,0,,
+Dynamic performance,Samples at code 0 or full scale,0,,non-zero means the input reaches the clipping range
+Static performance (ramp code-density test),Ramp conversions,34735,,
+Static performance (ramp code-density test),DNL max / min,+0.272 / -0.268,LSB,
+Static performance (ramp code-density test),INL max / min (end-point fit),+0.536 / -0.103,LSB,
+Static performance (ramp code-density test),Missing codes,0,,
+Static performance (ramp code-density test),Offset error at mid-scale (511->512),2.56504,LSB,comparator offset + switch charge injection/feed-through
+Static performance (ramp code-density test),Offset error at first transition (0->1),11.2971,LSB,includes the gain error (pivots about Vcm)
+Static performance (ramp code-density test),Gain error,-17.8703,LSB,-1.749% (top-plate parasitic attenuation)
+Figures of merit,Walden FoM = P/(2^ENOB*fs),10.0436,fJ/conv-step,full-scale ENOB
+Figures of merit,Walden FoM incl. worst-case Vcm buffer,13.4973,fJ/conv-step,
+Figures of merit,Schreier FoM = SNDR + 10log(fs/2/P),168.047,dB,
+Figures of merit,Energy per conversion,8.59238,pJ,
+Vcm-based vs conventional (same input signal),CDAC energy/conversion - Vcm-based (ideal array),2.60144,pJ,80.29 C*Vref^2
+Vcm-based vs conventional (same input signal),CDAC energy/conversion - conventional (ideal array),21.7311,pJ,670.71 C*Vref^2
+Vcm-based vs conventional (same input signal),CDAC switching-energy saving,88.029,%,
+Vcm-based vs conventional (same input signal),CDAC power at fs - Vcm-based / conventional,0.2601 / 2.173,uW,
+Vcm-based vs conventional (same input signal),Total capacitance - Vcm-based / conventional,512 / 1024,Cu,"50% less capacitor area, 2x lighter input load"
+Vcm-based vs conventional (same input signal),MSB decision,free in both (top-plate sampling),,
+Vcm-based vs conventional (same input signal),Plate moves per conversion,9 one-way moves (Vcm-based) vs up to 18 moves incl. reversals (conventional),,
+Vcm-based vs conventional (same input signal),Costs of Vcm-based,"third reference Vcm (buffer must source and sink), tri-level switches, Vcm accuracy sets DNL",,
+"CDAC switching-energy study (ideal array, all codes equally likely)",Vcm-based average (Vref energy),85.0835,C*Vref^2,single-ended
+"CDAC switching-energy study (ideal array, all codes equally likely)",Vcm-based differential equivalent (x2),170.167,C*Vref^2,closed form (Zhu 2010) = 170.2
+"CDAC switching-energy study (ideal array, all codes equally likely)",Conventional average,681.667,C*Vref^2,single-ended
+"CDAC switching-energy study (ideal array, all codes equally likely)",Conventional differential equivalent (x2),1363.33,C*Vref^2,closed form (Ginsburg/Liu) = 1363.3
+"CDAC switching-energy study (ideal array, all codes equally likely)",Average saving,87.5183,%,literature: 87.5%
+"CDAC switching-energy study (ideal array, all codes equally likely)",Vcm-based max / min over codes,127.75 / 0.00,C*Vref^2,
+Timing,Conversion period,10,us,
+Timing,Bit-clock period,833.333,ns,
+Timing,Track (sampling) time,833.333,ns,
+Timing,Latency: sampling instant -> data valid,8333.21,ns,
+Timing,PHI1 -> PHI2 / PHI2 -> PHI1 non-overlap,160 / 160,ps,
+Timing,Comparator decision time (median / max),317 / 974,ps,available 416.7 ns
+Timing,DAC settling to 0.5 LSB (largest top-plate step Vref/4),12.4766,ns,available 416.4 ns
+Timing,Track-mode time constant (median),0.285915,ns,
+Block characteristics,Bootstrap ratio Cb/(Cb+C_G),0.973255,,
+Block characteristics,M1 charge-injection step at Vin = 0 / Vref/2 / Vref,1.10 / 0.92 / 0.23,LSB,the variation across the range is what distorts; scale M1_W with the sampling capacitance
+Block characteristics,M1 Ron at Vin = 0 / Vref/2 / Vref,46.1 / 54.9 / 217.2,ohm,
+Block characteristics,kT/C noise,28.1929,uV rms,larger than conventional: half the sampling capacitance
+Block characteristics,Comparator offset (this instance),2.04101,mV,Pelgrom sigma = 4.17 mV
+Block characteristics,Comparator energy/decision,105.624,fJ,
+Block characteristics,CDAC cap errors 256C..1C (%),+0.000 +0.013 -0.017 -0.079 -0.057 -0.175 +0.015 +0.474 -0.246,%,
+Block characteristics,Clock-generator energy/frame,388.8,fJ,
+Design hints,Bootstrapped switch M2 gate driven by PHI (as drawn),"SFDR 72.7 dBc, THD -72.3 dBc, HD2 -72.7 dBc",,
+Design hints,Same chip with M2 gate tied to G,"SFDR 83.8 dBc, THD -83.7 dBc, HD2 -96.6 dBc",,"with PHI on M2's gate node B cannot pass Vin above VDD - Vth, so the boost and Ron degrade near full scale"
+Design hints,Comparator reference,Vinn tied to the same Vcm node (0.9 V) that resets the bottom plates,,
+Notes,Model,behavioural/circuit-aware; replace DEFAULT_PARAMS with your Spectre numbers,,
+Notes,Vcm accuracy,try --params with VCM_ERROR (e.g. 0.005) to see its effect on DNL/INL,,
